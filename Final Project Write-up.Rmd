@@ -1,0 +1,206 @@
+---
+title: "Final Project Write-up"
+output: html_document
+date: "2023-11-29"
+---
+Importing libraries to run
+```{r}
+library(tidyverse)
+library(ggthemes)
+library(ggrepel)
+library(broom)
+library(lindia)
+library(car)
+library(MASS)
+library(ggplot2)
+library(dplyr)
+library(tsibble)
+```
+
+**Project Goal:**
+
+Empower aspiring YouTubers with a holistic and actionable roadmap to success by providing comprehensive guidance, insights, and strategies. The primary objective is to equip content creators with the knowledge and tools necessary for building and sustaining a thriving YouTube channel. This includes not only technical aspects like content creation and optimization but also the development of a strategic mindset that fosters long-term success in the dynamic landscape of online content creation.
+
+**Purpose of the Project:**
+
+This project is driven by a commitment to demystify the journey to YouTube success, recognizing the multifaceted nature of achieving and maintaining a prosperous channel. Serving as a valuable and ongoing resource for emerging content creators, the project aims to go beyond superficial advice by offering in-depth knowledge. The purpose is not just to educate creators on the basics but to inspire them with real-world success stories, guide them through practical tips, and keep them constantly updated on the latest trends, algorithm changes, and industry best practices.
+
+**Dataset Used:**
+
+Dataset Overview: The "Global YouTube Statistics" dataset provides comprehensive information about various YouTube channels worldwide, encompassing key metrics such as subscriber counts, video views, upload frequency, country of origin, earnings, and more.
+
+Initially setting our directories and loading our data.
+```{r}
+knitr::opts_knit$set(root.dir = 'C:/Users/Prana/OneDrive/Documents/Topics in Info FA23(Grad)')
+youtube <- read_delim("./Global Youtube Statistics.csv", delim = ",")
+```
+
+Link: https://www.kaggle.com/datasets/nelgiriyewithana/global-youtube-statistics-2023
+
+**Based on the project goal and purpose, we can come up with some novel questions to investigate. Some of them include:**
+
+**1. Do YouTubers from certain countries tend to have more subscribers or higher video views on average?** 
+
+This can be analyzed by creating a box plot between countries and video views & between countries and subscribers as
+we are comparing a continuous vs categorical variable. Since there are too many countries, we are consolidating them. 
+```{r}
+# Create a new variable 'GroupedCountry' to consolidate countries
+youtube$GroupedCountry <- ifelse(youtube$Country %in% c("India", "United States", "Pakistan", "South Korea", "Argentina", "Thailand", "Russia", "United Kingdom", "Brazil", "Japan"), youtube$Country, "Other")
+
+# Video Views
+ggplot(data = youtube) + 
+  geom_boxplot(mapping = aes(x = GroupedCountry, y = `video views`)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Boxplot of Video Views by Grouped Country")
+
+# Subscribers
+ggplot(data = youtube) + 
+  geom_boxplot(mapping = aes(x = GroupedCountry, y = subscribers)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Boxplot of Subscribers by Grouped Country")
+```
+
+The box plots highlight potential success patterns for YouTube channels in different countries. Channels in India and the United States show a higher likelihood of significant success, with numerous outliers indicating exceptional subscribers and video views. Meanwhile, Pakistan has the highest median, suggesting a solid chance for decent success.
+
+**2. Do you need subscribers to get more video views or vice-versa?**
+
+*Since there are few Youtube channels with 0 video views (These channels belong to YouTube and don't post anything), we shall be removing them so that it doesn't hinder our observations.*
+
+```{r}
+youtube <- youtube |>
+  filter(`video views` != 0)
+```
+
+To answer this question, we shall create a scatter plot for the relationship between the number of subscribers (x axis) and the number of video views (y axis) on a YouTube channel using a linear regression line fitted to the data. And then we can build a linear regression model (model) with the number of subscribers as the response variable and the number of video views as the predictor variable.
+```{r}
+youtube |>
+  ggplot(mapping = aes(x = subscribers, y = `video views`)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = 'darkblue') + 
+  theme_minimal()
+
+# Build the linear regression model
+model <- lm(subscribers ~ `video views`, data = youtube)
+# Summarize the model
+summary(model)
+```
+
+The multiple R-squared value (0.6794) indicates the proportion of variability in subscribers that is explained by the number of video views. In this case, approximately 67.94% of the variability in subscribers can be explained by the linear relationship with video views. *Therefore, we can say for most cases, you need more subscribers to get more views, and vice-versa.*
+
+**3. Do Youtubers that upload more earn more?**
+
+This can be analyzed by first finding the average yearly earnings by using the columns 'highest_yearly_earnings' 
+and 'lowest_yearly_earnings'. This is mutated to the dataset. Then we can create a line plot to analyze the average yearly earnings of Youtubers based on the number of uploads.
+```{r}
+youtube |>
+  mutate(avg_yr_earn=(highest_yearly_earnings+lowest_yearly_earnings)/2) |>
+  ggplot() +
+  geom_line(mapping = aes(x = uploads,y = avg_yr_earn)) 
+```
+
+The line plot shows that there's no clear link between how many videos a YouTuber uploads and how much money they make on average. So, it seems like making more videos doesn't necessarily mean you'll earn more.
+
+**4. Does the age of the Youtube channel attribute to the success of the channel?**
+
+We can do this by exploring the relationship between the age of YouTube channels and their success, measured by the number of subscribers. First, the created_year variable is converted to a Date format. Duplicate rows in the dataset are then checked and removed, ensuring that each unique channel creation year corresponds to a single data point. After transforming the data into a time series format using the tsibble package, a line plot is generated to visualize the trend of YouTube subscribers over time. This plot allows for the examination of any patterns or correlations between the age of YouTube channels and their subscriber counts, providing insights into whether channel age attributes to the success of the channel.
+```{r}
+#Since there is a Youtube channel with created_year of 1970, we need to remove that to prevent inaccurate readings for our data dive.
+youtube <- youtube |>
+ filter(created_year != 1970)
+
+youtube <- youtube |>
+  mutate(created_year = as.Date(as.character(created_year), format = "%Y"))
+# Filter out rows with missing values in created_year
+youtube_ <- youtube %>%
+  dplyr::select(created_year, subscribers) %>%
+  filter(!is.na(created_year)) %>%
+  distinct()
+
+# Check for duplicate rows
+duplicates <- youtube_ %>% duplicates()
+# Print duplicates if any
+if (nrow(duplicates) > 0) {
+  print("Duplicate rows:")
+  print(duplicates)
+  
+  # Remove duplicate rows using group_by() and summarize()
+  youtube_ <- youtube_ %>%
+    group_by(created_year) %>%
+    summarize(subscribers = mean(subscribers, na.rm = TRUE))
+
+  # Check for duplicate rows again
+  duplicates <- youtube_ %>% duplicates()
+  
+  # Print a message if duplicates are still present
+  if (nrow(duplicates) > 0) {
+    print("Duplicate rows still exist after removal:")
+    print(duplicates)
+    stop("Duplicate rows still exist after removal.")
+  }
+}
+
+# Create the tsibble
+youtube_tsibble <- as_tsibble(youtube_, index = created_year)
+# Plot the entire time series
+ggplot(youtube_tsibble, aes(x = created_year, y = subscribers)) +
+  geom_line() +
+  labs(title = "YouTube Subscribers Over Time",
+       x = "Year",
+       y = "Subscribers")
+```
+
+The graph shows that older YouTube channels generally have more subscribers. This makes sense because channels that have been around longer have had more time to make videos and attract viewers who subscribe. The slight decrease in average subscribers over the years might be due to newer channels joining, spreading subscribers across a larger number of channels. Overall, it suggests that sticking around on YouTube and making content consistently can lead to more subscribers over time. This is good news for new YouTubers, as it shows that building a channel takes time, and patience and persistence can pay off in the long run.
+
+**5. Which channel types engage urban audiences?**
+
+We calculate the probability that YouTube channels, grouped by their channel types, have video views greater than the mean video views across all channels in the dataset, with the additional condition that the urban population ratio within each channel type group must be greater than 0.85. Then we create a horizontal bar graph to visualize the probability values for each channel type.
+```{r}
+gp5<- youtube |>
+  group_by(channel_type)|>
+  mutate(urban_ratio=Urban_population/Population)|>
+  filter(urban_ratio>0.85) |>
+  summarize(probability=sum(`video views`>mean(`video views`))/ n())
+q5<-data.frame(gp5)
+ 
+
+ggplot(q5, aes(x = probability, y = channel_type)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(x = "Probability", y = "Channel Type") +
+  theme_minimal()
+```
+ 
+Channel types like News and Nonprofit have probabilities of 0, indicating that, within the selected subset of channels with high urban population ratios (urban_ratio > 0.85), they are less likely to have video views above the mean. Meanwhile, channel types, such as Comedy and Games, tend to have a higher likelihood of engaging viewers where urban population ratio is more. 
+
+**6.Which category give a better probability of success?**
+
+To answer this question, we can we calculate the probability of the number of channels having more than 10 million subscribers in each category. And then plot these probabilities on a scatter plot with each category. We are taking 10 million subscribers as a threshold for the success of a Youtube channel.
+```{r}
+gp6<- youtube |>
+  group_by(category)|>
+  summarize(probability = sum(subscribers > 100000000) / n())
+q6<-data.frame(gp6)
+q6
+
+q6|>
+  ggplot()+
+  geom_point(mapping=aes(x=category,y=probability))+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+From the probability values, we conclude that among the 19 categories present, 11 of them have 0 probability of having subscribers more than 10 million. We also notice that category 'shows' have the highest probability of 0.076923077 and other categories have a probability of less than 0.03. This shows that most categories don't have the capabilities to go over 10 million subscribers and even if they do, most fall under the category 'shows'.
+
+**Final Recommendations for Aspiring Youtubers:**
+
+- Consider targeting audiences in countries like India and the United States, as these regions tend to have higher chances of substantial success for YouTube channels. The presence of numerous outliers in subscriber and video view metrics suggests greater potential for outstanding achievements.
+
+- Recognize the symbiotic relationship between subscribers and video views. The linear regression analysis indicates that, in most cases, gaining more subscribers is associated with getting more views, and vice versa. Focus on building a dedicated subscriber base to boost overall channel visibility and engagement.
+
+- The analysis reveals no clear correlation between the number of video uploads and average earnings. Instead of prioritizing quantity, emphasize the quality of content. Engage in strategic content creation, focusing on audience preferences and optimization techniques to enhance overall channel performance.
+
+- Understand that channel age plays a role in success. Older YouTube channels tend to accumulate more subscribers over time. New creators should recognize the importance of persistence and consistency, as building a substantial subscriber base takes time and continuous content creation.
+
+- For channels targeting urban audiences, categories such as Comedy and Games show a higher likelihood of engaging viewers. Consider tailoring content to align with the preferences of urban audiences within these categories.
+
+- When aiming for substantial success (more than 10 million subscribers), focus on categories with higher success probabilities. Categories like 'Shows' exhibit the highest probability, offering a potential pathway to reaching a large subscriber base.
+
+**By integrating these recommendations, aspiring YouTubers can enhance their chances of building and sustaining a successful YouTube channel in the competitive landscape of online content creation.**
